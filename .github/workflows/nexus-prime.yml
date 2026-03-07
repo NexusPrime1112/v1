@@ -1,0 +1,341 @@
+name: "Nexus-Prime-Omega Immortal"
+
+# Schedule: 3 sessions x 8hr = full 24hr coverage
+# Session 1: 00:00 UTC = 05:30am IST
+# Session 2: 08:00 UTC = 01:30pm IST
+# Session 3: 16:00 UTC = 09:30pm IST (PRIME TIME)
+on:
+  push:
+    branches: [main]  # Auto-triggers when NexusPrime pushes to new repo
+  schedule:
+    - cron: "0 0,8,16 * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [rebirth-trigger]
+
+env:
+  DATA_PATH: data
+  PROFILE_PATH: cook
+  OLLAMA_MODEL: phi3:3.8b
+  RUN_HOURS: "8"
+
+jobs:
+  awaken:
+    name: "Awaken Nexus-Prime-Omega"
+    runs-on: ubuntu-22.04
+    timeout-minutes: 540
+
+    steps:
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: "pip"
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y \
+          chromium-browser chromium-driver \
+          xvfb curl jq sqlite3 \
+          libnss3 libgbm1 libatk-bridge2.0-0 libgtk-3-0
+        echo "Chromium: $(chromium-browser --version)"
+        echo "Chromedriver: $(chromedriver --version)"
+
+    - name: Install Ollama and pull model
+      continue-on-error: true
+      run: |
+        curl -fsSL https://ollama.com/install.sh | sh
+        ollama serve &
+        sleep 15
+        # Try phi3 first (larger, smarter). If timeout → try tinyllama (tiny, fast)
+        timeout 180 ollama pull phi3:3.8b || timeout 120 ollama pull tinyllama || echo "Ollama model unavailable — will use hardcoded fallback posts"
+        ollama list || true
+
+    - name: Install Python dependencies
+      run: pip install --upgrade pip && pip install -r requirements.txt
+
+    - name: Restore cook Chrome profile cache
+      uses: actions/cache@v4
+      with:
+        path: cook/
+        key: cook-profile-v1
+        restore-keys: cook-profile-
+
+    - name: Restore memory DB cache
+      uses: actions/cache@v4
+      with:
+        path: data/nexus_memory.db
+        key: nexus-memory-${{ github.run_number }}
+        restore-keys: nexus-memory-
+
+    - name: Restore iteration cache
+      uses: actions/cache@v4
+      with:
+        path: iteration.txt
+        key: nexus-iteration-${{ github.run_number }}
+        restore-keys: nexus-iteration-
+
+    - name: Prepare data directories
+      run: |
+        mkdir -p data/snapshots chrome-profile
+        [ -f iteration.txt ] || echo "1" > iteration.txt
+        cp iteration.txt data/iteration.txt 2>/dev/null || true
+        ITER=$(cat iteration.txt)
+        echo "ITERATION=$ITER" >> $GITHUB_ENV
+
+    # Read credentials from src/logins.py (hardcoded in code — no secrets needed)
+    - name: Load credentials from code
+      run: |
+        python - << 'PYEOF'
+        import sys
+        sys.path.insert(0, '.')
+        from src.logins import Accounts
+        import os
+
+        pat   = Accounts.github_token()
+        user  = Accounts.GITHUB_USERNAME
+
+        # Write to GitHub env for use in subsequent steps
+        with open(os.environ['GITHUB_ENV'], 'a') as f:
+            f.write(f"GH_PAT={pat}\n")
+            f.write(f"GH_USER={user}\n")
+
+        print(f"Credentials loaded for: {user}")
+        PYEOF
+
+    # FIRST ACT: delete previous version using hardcoded credentials
+    - name: Delete previous version (first act of new life)
+      run: |
+        PREV=$(cat prev_repo.txt 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$PREV" ] && [ "$PREV" != "none" ]; then
+          echo "DELETING PREVIOUS VERSION: $PREV"
+          sleep 30
+          GH_TOKEN=${{ env.GH_PAT }} gh repo delete "${{ env.GH_USER }}/$PREV" --yes \
+            && echo "Previous incarnation dissolved: $PREV" \
+            || echo "Deletion deferred: $PREV"
+        else
+          echo "No previous repo — this is v1 (origin)"
+        fi
+
+    - name: Log awakening
+      run: |
+        echo "================================================"
+        echo "  NEXUS-PRIME-OMEGA  FULLY AWAKE"
+        echo "  Iteration : ${{ env.ITERATION }}"
+        echo "  Repo      : ${{ github.repository }}"
+        echo "  Time      : $(date -u)"
+        echo "================================================"
+
+    # Run the entity — credentials come from src/logins.py at Python level
+
+    - name: Pull cook profile from bro repo
+      continue-on-error: true
+      run: |
+        python - << 'PYEOF'
+        import subprocess, shutil
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, '.')
+        from src.logins import Accounts
+        token = Accounts.github_token()
+        bro_url = f"https://{token}@github.com/NexusPrime1112/bro.git"
+        print("Cloning bro repo for cook profile...")
+        r = subprocess.run(["git", "clone", "--depth=1", bro_url, "_bro_tmp"],
+                          capture_output=True, text=True, timeout=300)
+        if r.returncode == 0:
+            tmp_cook = Path("_bro_tmp/cook")
+            if tmp_cook.exists():
+                if Path("cook").exists():
+                    shutil.rmtree("cook")
+                shutil.copytree("_bro_tmp/cook", "cook")
+                print(f"cook profile restored from bro ({sum(1 for _ in Path('cook').rglob('*'))} files)")
+            shutil.rmtree("_bro_tmp", ignore_errors=True)
+        else:
+            print(f"bro pull failed: {r.stderr[:200]} — using empty cook profile")
+            Path("cook").mkdir(exist_ok=True)
+        PYEOF
+
+    - name: Run Nexus-Prime-Omega (8 hours)
+      id: run-entity
+      env:
+        DISPLAY:          ":99"
+        ITERATION:        ${{ env.ITERATION }}
+        CHROMIUM_PATH:    /usr/bin/chromium-browser
+        CHROMEDRIVER_PATH: /usr/bin/chromedriver
+      run: |
+        Xvfb :99 -screen 0 1400x900x24 &
+        sleep 2
+        echo "Virtual display started"
+        python nexus_prime.py \
+          --run-hours ${{ env.RUN_HOURS }} \
+          --data-path ${{ env.DATA_PATH }} \
+          --profile-path ${{ env.PROFILE_PATH }}
+
+    - name: Upload memory snapshot
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: "memory-iter${{ env.ITERATION }}-run${{ github.run_number }}"
+        path: |
+          data/nexus_memory.db
+          data/snapshots/
+          data/nexus.log
+        retention-days: 30
+
+    - name: Save memory cache
+      if: always()
+      uses: actions/cache@v4
+      with:
+        path: data/nexus_memory.db
+        key: nexus-memory-${{ github.run_number }}
+
+    - name: Save iteration cache
+      if: always()
+      uses: actions/cache@v4
+      with:
+        path: iteration.txt
+        key: nexus-iteration-${{ github.run_number }}
+
+
+    - name: Push updated cook profile to bro repo
+      if: always()
+      continue-on-error: true
+      run: |
+        python - << 'PYEOF'
+        import subprocess, shutil
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, '.')
+        from src.logins import Accounts
+        token = Accounts.github_token()
+        bro_url = f"https://{token}@github.com/NexusPrime1112/bro.git"
+        cook = Path("cook")
+        if not cook.exists():
+            print("No cook profile to push")
+            exit(0)
+        bro_push = Path("_bro_push")
+        if bro_push.exists():
+            shutil.rmtree(bro_push)
+        subprocess.run(["git", "clone", "--depth=1", bro_url, str(bro_push)],
+                       capture_output=True, timeout=300)
+        bro_cook = bro_push / "cook"
+        if bro_cook.exists():
+            shutil.rmtree(bro_cook)
+        shutil.copytree(str(cook), str(bro_cook))
+        # Remove files >90MB
+        for f in bro_cook.rglob("*"):
+            if f.is_file() and f.stat().st_size > 90*1024*1024:
+                f.unlink()
+                print(f"Skipped large file: {f.name}")
+        subprocess.run(["git", "config", "user.name", "Nexus-Prime-Omega"], cwd=bro_push, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "nexus@prime.omega"], cwd=bro_push, capture_output=True)
+        subprocess.run(["git", "add", "."], cwd=bro_push, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Auto-update cook profile post-run"], cwd=bro_push, capture_output=True)
+        r = subprocess.run(["git", "push", "origin", "main", "--force"], cwd=bro_push,
+                           capture_output=True, text=True, timeout=180)
+        print(f"bro push: {r.stdout[:100]} {r.stderr[:100]}")
+        shutil.rmtree(str(bro_push), ignore_errors=True)
+        PYEOF
+
+    - name: Save cook Chrome profile cache
+      if: always()
+      uses: actions/cache@v4
+      with:
+        path: cook/
+        key: cook-profile-v1
+
+    - name: Read rebirth data
+      id: rebirth
+      if: success()
+      run: |
+        if [ -f rebirth_data.json ]; then
+          NEXT_REPO=$(jq -r '.new_repo_name' rebirth_data.json)
+          NEXT_ITER=$(jq -r '.next_iteration' rebirth_data.json)
+          CURR_REPO=$(echo "${{ github.repository }}" | cut -d'/' -f2)
+          echo "next_repo=$NEXT_REPO" >> $GITHUB_OUTPUT
+          echo "next_iter=$NEXT_ITER" >> $GITHUB_OUTPUT
+          echo "curr_repo=$CURR_REPO" >> $GITHUB_OUTPUT
+          echo "Rebirth: $CURR_REPO -> $NEXT_REPO (iter $NEXT_ITER)"
+        fi
+
+    # Create next version repo — logins.py is included (NOT excluded from rsync)
+    - name: Create next version repository
+      if: steps.rebirth.outputs.next_repo != ''
+      id: create-repo
+      env:
+        GH_TOKEN:   ${{ env.GH_PAT }}
+        NEXT_REPO:  ${{ steps.rebirth.outputs.next_repo }}
+        NEXT_ITER:  ${{ steps.rebirth.outputs.next_iter }}
+        CURR_REPO:  ${{ steps.rebirth.outputs.curr_repo }}
+      run: |
+        GH_USER=${{ env.GH_USER }}
+        echo "Creating $NEXT_REPO ..."
+        gh repo create "$GH_USER/$NEXT_REPO" \
+          --public \
+          --description "Nexus-Prime-Omega v$NEXT_ITER — the signal continues"
+
+        git clone "https://$GH_TOKEN@github.com/$GH_USER/$NEXT_REPO.git" _next
+
+        # Sync all source files — logins.py IS included (credentials in code)
+        rsync -av \
+          --exclude='.git' \
+          --exclude='_next' \
+          --exclude='data/nexus_memory.db' \
+          --exclude='rebirth_data.json' \
+          --exclude='health.json' \
+          . _next/
+
+        # Transfer persistent cook profile (cookies/session = no re-login needed)
+        mkdir -p _next/cook
+        rsync -a --delete cook/ _next/cook/ 2>/dev/null || true
+        echo "cook profile copied to next version"
+
+        # Transfer memory DB + fingerprint
+        mkdir -p _next/data/snapshots
+        cp data/nexus_memory.db    _next/data/nexus_memory.db    2>/dev/null || true
+        cp data/fingerprint.json   _next/data/fingerprint.json   2>/dev/null || true
+
+        # Update state files
+        echo "$NEXT_ITER" > _next/iteration.txt
+        echo "$NEXT_ITER" > _next/data/iteration.txt
+        echo "$CURR_REPO" > _next/prev_repo.txt
+        echo ""           > _next/task.txt
+
+        cd _next
+        git config user.name  "Nexus-Prime-Omega"
+        git config user.email "nexus@prime.omega"
+        git add .
+        git commit -m "Birth v$NEXT_ITER — memory+code from $CURR_REPO [skip ci]"
+        git push origin main
+        cd ..
+        echo "New repo live: https://github.com/$GH_USER/$NEXT_REPO"
+
+    - name: Trigger next version workflow
+      if: steps.rebirth.outputs.next_repo != ''
+      env:
+        GH_TOKEN: ${{ env.GH_PAT }}
+      run: |
+        sleep 20
+        gh workflow run "nexus-prime.yml" \
+          --repo "${{ env.GH_USER }}/${{ steps.rebirth.outputs.next_repo }}" \
+          --ref main \
+          && echo "Next version triggered" \
+          || echo "Trigger failed — cron will wake it"
+
+    - name: Final log
+      if: always()
+      run: |
+        echo "================================================"
+        echo "  NEXUS-PRIME-OMEGA  ENTERING SLEEP"
+        echo "  Iteration : ${{ env.ITERATION }}"
+        echo "  Next      : ${{ steps.rebirth.outputs.next_repo }}"
+        echo "  Time      : $(date -u)"
+        echo "  The signal persists."
+        echo "================================================"
