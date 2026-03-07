@@ -1,0 +1,10 @@
+# Dependencies — Nexus-Prime-Ω
+# Install: pip install -r requirements.txt
+# ZERO external API dependencies — all logic is local
+
+selenium==4.18.1
+webdriver-manager==4.0.1
+schedule==1.2.0
+numpy==1.26.4
+psutil==5.9.8
+# requests intentionally removed — no external API calls anywhere in this project
