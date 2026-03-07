@@ -1,0 +1,51 @@
+# NEXUS-PRIME-Ω  .gitignore
+
+# ── Local reference files (not needed in repo) ──────────────────
+knoulege.txt
+refrence/
+refrence - Copy/
+puss/
+
+# ── Chrome Profile (push separately or cache in Actions) ────────
+# chrome-profile/ (Commented out to allow committing the cook profile)
+
+# ── Data & Memory (cached in Actions, not in repo) ──────────────
+data/nexus_memory.db
+data/snapshots/
+data/*.log
+*.log
+
+# ── Rebirth output (generated at runtime) ───────────────────────
+rebirth_data.json
+
+# ── Python ──────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ── IDE ─────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+PAT.txt
+_do_push.py
+_bro_*
+_v1_*
+_fix_*
+_nexus_*
+_final_*
+push/
+*.log
+console.txt
+crash.txt
